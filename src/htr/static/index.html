@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Handwritten Text Recognition</title>
+<style>
+  :root {
+    --ink: #1c1c1e;
+    --bg: #f5f4f0;
+    --card: #ffffff;
+    --accent: #3457d5;
+    --accent-dim: #7788c9;
+    --border: #ddd9d0;
+    --ok: #1c8a4b;
+    --warn: #b4880a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    min-height: 100vh;
+  }
+  header {
+    padding: 2rem 1.5rem 1rem;
+    text-align: center;
+  }
+  header h1 { margin: 0 0 0.4rem; font-size: 1.6rem; }
+  header p { margin: 0; color: #666; font-size: 0.95rem; }
+  .badge {
+    display: inline-block;
+    margin-top: 0.6rem;
+    font-size: 0.75rem;
+    background: #fff3cd;
+    color: #7a5b00;
+    border: 1px solid #f0d98c;
+    padding: 0.15rem 0.6rem;
+    border-radius: 999px;
+  }
+  main {
+    max-width: 920px;
+    margin: 0 auto;
+    padding: 0 1.5rem 3rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+  @media (max-width: 720px) {
+    main { grid-template-columns: 1fr; }
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem;
+  }
+  .card h2 {
+    margin: 0 0 0.9rem;
+    font-size: 1.05rem;
+  }
+  .tabs {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+  }
+  .tab-btn {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid var(--border);
+    background: #faf9f6;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: #555;
+  }
+  .tab-btn.active {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  #draw-panel, #upload-panel { display: none; }
+  #draw-panel.active, #upload-panel.active { display: block; }
+
+  canvas#pad {
+    width: 100%;
+    aspect-ratio: 4 / 1;
+    background: white;
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    touch-action: none;
+    cursor: crosshair;
+    display: block;
+  }
+  .draw-controls {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+  }
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 2rem 1rem;
+    text-align: center;
+    color: #888;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .drop-zone.drag { border-color: var(--accent); color: var(--accent); background: #f0f2ff; }
+  #preview {
+    max-width: 100%;
+    max-height: 120px;
+    margin-top: 0.75rem;
+    display: none;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+  }
+  input[type=file] { display: none; }
+
+  button.primary, button.secondary {
+    font-size: 0.9rem;
+    padding: 0.55rem 1rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+  }
+  button.primary {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent);
+  }
+  button.primary:disabled { background: var(--accent-dim); border-color: var(--accent-dim); cursor: default; }
+  button.secondary { background: #faf9f6; color: #444; }
+
+  #submit-row { margin-top: 1rem; display: flex; gap: 0.6rem; align-items: center; }
+  #status { font-size: 0.85rem; color: #888; }
+
+  .result-text {
+    font-size: 2rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    min-height: 2.6rem;
+    word-break: break-all;
+  }
+  .result-text.empty { color: #bbb; font-weight: 400; font-size: 1.1rem; }
+  .confidence-row {
+    margin-top: 0.9rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .char-chip {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    min-width: 2rem;
+    padding: 0.3rem 0.4rem;
+    border-radius: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  .char-chip .c { font-size: 1.1rem; font-weight: 600; }
+  .char-chip .p { font-size: 0.65rem; opacity: 0.75; }
+  .mean-conf { margin-top: 1rem; font-size: 0.85rem; color: #666; }
+  .error-box {
+    background: #fdecea;
+    color: #a1281c;
+    border: 1px solid #f3c1ba;
+    border-radius: 8px;
+    padding: 0.7rem 0.9rem;
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+    display: none;
+  }
+  footer {
+    text-align: center;
+    font-size: 0.8rem;
+    color: #999;
+    padding-bottom: 2rem;
+  }
+  footer a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Handwritten Text Recognition</h1>
+  <p>Draw or upload a single handwritten word. A CRNN-CTC model transcribes it, character by character.</p>
+  <span class="badge">Smoke-trained on synthetic fonts — not IAM-scale. See README.</span>
+</header>
+
+<main>
+  <section class="card">
+    <div class="tabs">
+      <button class="tab-btn active" id="tab-draw" type="button">Draw</button>
+      <button class="tab-btn" id="tab-upload" type="button">Upload</button>
+    </div>
+
+    <div id="draw-panel" class="active">
+      <canvas id="pad" width="800" height="200"></canvas>
+      <div class="draw-controls">
+        <button class="secondary" id="clear-btn" type="button">Clear</button>
+      </div>
+    </div>
+
+    <div id="upload-panel">
+      <div class="drop-zone" id="drop-zone">
+        Click to choose an image, or drag one here<br />(PNG/JPG of a single word)
+        <input type="file" id="file-input" accept="image/*" />
+      </div>
+      <img id="preview" alt="preview" />
+    </div>
+
+    <div id="submit-row">
+      <button class="primary" id="submit-btn" type="button">Recognize</button>
+      <span id="status"></span>
+    </div>
+    <div class="error-box" id="error-box"></div>
+  </section>
+
+  <section class="card">
+    <h2>Result</h2>
+    <div class="result-text empty" id="result-text">Draw or upload a word, then click Recognize.</div>
+    <div class="confidence-row" id="confidence-row"></div>
+    <div class="mean-conf" id="mean-conf"></div>
+  </section>
+</main>
+
+<footer>
+  API: <code>POST /predict</code> (multipart file or <code>{"image_base64": "..."}</code> JSON) &middot;
+  <a href="/docs" target="_blank">OpenAPI docs</a>
+</footer>
+
+<script>
+(function () {
+  const tabDraw = document.getElementById('tab-draw');
+  const tabUpload = document.getElementById('tab-upload');
+  const drawPanel = document.getElementById('draw-panel');
+  const uploadPanel = document.getElementById('upload-panel');
+  const canvas = document.getElementById('pad');
+  const ctx = canvas.getContext('2d');
+  const clearBtn = document.getElementById('clear-btn');
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  const preview = document.getElementById('preview');
+  const submitBtn = document.getElementById('submit-btn');
+  const statusEl = document.getElementById('status');
+  const errorBox = document.getElementById('error-box');
+  const resultText = document.getElementById('result-text');
+  const confidenceRow = document.getElementById('confidence-row');
+  const meanConf = document.getElementById('mean-conf');
+
+  let mode = 'draw';
+  let uploadedFile = null;
+  let hasDrawing = false;
+
+  function resetCanvas() {
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.lineWidth = 10;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#111111';
+    hasDrawing = false;
+  }
+  resetCanvas();
+
+  function setMode(next) {
+    mode = next;
+    tabDraw.classList.toggle('active', next === 'draw');
+    tabUpload.classList.toggle('active', next === 'upload');
+    drawPanel.classList.toggle('active', next === 'draw');
+    uploadPanel.classList.toggle('active', next === 'upload');
+  }
+  tabDraw.addEventListener('click', () => setMode('draw'));
+  tabUpload.addEventListener('click', () => setMode('upload'));
+
+  // --- Drawing (mouse + touch) ---
+  let drawing = false;
+  function pos(evt) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const p = evt.touches ? evt.touches[0] : evt;
+    return { x: (p.clientX - rect.left) * scaleX, y: (p.clientY - rect.top) * scaleY };
+  }
+  function start(evt) {
+    evt.preventDefault();
+    drawing = true;
+    hasDrawing = true;
+    const { x, y } = pos(evt);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }
+  function move(evt) {
+    if (!drawing) return;
+    evt.preventDefault();
+    const { x, y } = pos(evt);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  }
+  function end() { drawing = false; }
+
+  canvas.addEventListener('mousedown', start);
+  canvas.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', end);
+  canvas.addEventListener('touchstart', start, { passive: false });
+  canvas.addEventListener('touchmove', move, { passive: false });
+  canvas.addEventListener('touchend', end);
+
+  clearBtn.addEventListener('click', resetCanvas);
+
+  // --- Upload ---
+  dropZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files[0]) handleFile(fileInput.files[0]);
+  });
+  ['dragover', 'dragenter'].forEach((evt) =>
+    dropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropZone.classList.add('drag');
+    })
+  );
+  ['dragleave', 'drop'].forEach((evt) =>
+    dropZone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('drag');
+    })
+  );
+  dropZone.addEventListener('drop', (e) => {
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  });
+  function handleFile(file) {
+    uploadedFile = file;
+    const reader = new FileReader();
+    reader.onload = () => {
+      preview.src = reader.result;
+      preview.style.display = 'block';
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // --- Submit ---
+  function showError(msg) {
+    errorBox.textContent = msg;
+    errorBox.style.display = msg ? 'block' : 'none';
+  }
+
+  function confidenceColor(p) {
+    // green (high) -> amber (mid) -> red (low)
+    if (p >= 0.85) return { bg: '#e3f5ea', fg: '#1c8a4b' };
+    if (p >= 0.6) return { bg: '#fff6e0', fg: '#a3760a' };
+    return { bg: '#fdecea', fg: '#a1281c' };
+  }
+
+  function renderResult(data) {
+    resultText.textContent = data.text || '(empty)';
+    resultText.classList.toggle('empty', !data.text);
+    confidenceRow.innerHTML = '';
+    (data.chars || []).forEach((c) => {
+      const chip = document.createElement('div');
+      chip.className = 'char-chip';
+      const { bg, fg } = confidenceColor(c.confidence);
+      chip.style.background = bg;
+      chip.style.color = fg;
+      const cSpan = document.createElement('span');
+      cSpan.className = 'c';
+      cSpan.textContent = c.char;
+      const pSpan = document.createElement('span');
+      pSpan.className = 'p';
+      pSpan.textContent = Math.round(c.confidence * 100) + '%';
+      chip.appendChild(cSpan);
+      chip.appendChild(pSpan);
+      confidenceRow.appendChild(chip);
+    });
+    meanConf.textContent = data.chars && data.chars.length
+      ? `Mean confidence: ${Math.round(data.mean_confidence * 100)}%`
+      : '';
+  }
+
+  async function submit() {
+    showError('');
+    let blob;
+    if (mode === 'draw') {
+      if (!hasDrawing) {
+        showError('Draw a word on the canvas first.');
+        return;
+      }
+      blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    } else {
+      if (!uploadedFile) {
+        showError('Choose an image file first.');
+        return;
+      }
+      blob = uploadedFile;
+    }
+
+    submitBtn.disabled = true;
+    statusEl.textContent = 'Recognizing...';
+    try {
+      const form = new FormData();
+      form.append('file', blob, 'word.png');
+      const res = await fetch('/predict', { method: 'POST', body: form });
+      const data = await res.json();
+      if (!res.ok) {
+        showError(data.detail || 'Prediction failed.');
+      } else {
+        renderResult(data);
+      }
+    } catch (err) {
+      showError('Request failed: ' + err.message);
+    } finally {
+      submitBtn.disabled = false;
+      statusEl.textContent = '';
+    }
+  }
+
+  submitBtn.addEventListener('click', submit);
+})();
+</script>
+</body>
+</html>
