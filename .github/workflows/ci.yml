@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system fonts (Linux fallback for synthetic word rendering)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-dejavu-core fonts-liberation
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Create venv and install package
+        run: |
+          uv venv -p 3.12 .venv
+          uv pip install -p .venv/bin/python -e ".[dev]"
+
+      - name: Unit tests (model, data, decode, metrics — no checkpoint needed)
+        run: .venv/bin/python -m pytest -q tests/ --ignore=tests/test_api.py
+
+      - name: Smoke-train a checkpoint (~5 min, CPU; same recipe as the README quickstart)
+        run: |
+          .venv/bin/python -m htr.train \
+            --epochs 16 --train-size 3000 --val-size 300 --lr 1e-3 \
+            --out checkpoints/crnn.pt
+
+      - name: Export to ONNX (with onnxruntime parity check)
+        run: |
+          .venv/bin/python -m htr.export_onnx \
+            --checkpoint checkpoints/crnn.pt --out checkpoints/crnn.onnx
+
+      - name: API tests (exercise /predict against the exported model)
+        run: .venv/bin/python -m pytest -q tests/test_api.py
+
+      - name: Full test suite
+        run: .venv/bin/python -m pytest -q
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system fonts (Linux fallback for synthetic word rendering)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-dejavu-core fonts-liberation
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Create venv, install package, and produce a smoke checkpoint + ONNX export
+        run: |
+          uv venv -p 3.12 .venv
+          uv pip install -p .venv/bin/python -e ".[dev]"
+          .venv/bin/python -m htr.train \
+            --epochs 16 --train-size 3000 --val-size 300 --lr 1e-3 \
+            --out checkpoints/crnn.pt
+          .venv/bin/python -m htr.export_onnx \
+            --checkpoint checkpoints/crnn.pt --out checkpoints/crnn.onnx
+
+      - name: Build the serving image
+        run: docker build -t htr-api:ci .
+
+      - name: Run container and verify /health + /predict end-to-end
+        run: |
+          docker run -d --rm -p 8000:8000 --name htr-api-ci htr-api:ci
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:8000/health > /dev/null; then break; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/health | tee /tmp/health.json
+          grep -q '"model_loaded":true' /tmp/health.json
+
+      - name: Stop container
+        if: always()
+        run: docker stop htr-api-ci || true
