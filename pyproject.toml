@@ -1,0 +1,50 @@
+[project]
+name = "handwritten-text-reading"
+version = "0.1.0"
+description = "From-scratch CNN classifiers for handwritten character recognition (MNIST/EMNIST)"
+requires-python = ">=3.12"
+dependencies = [
+    "torch",
+    "torchvision",
+    "numpy",
+    "pyyaml",
+    "onnx",
+    "onnxruntime",
+    "fastapi",
+    "uvicorn",
+    "pillow",
+    "python-multipart",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "ruff"]
+
+[project.scripts]
+htr-train = "htr.train:main"
+htr-evaluate = "htr.evaluate:main"
+htr-export = "htr.export_onnx:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+htr = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# Original from-scratch architecture code, kept stylistically untouched.
+"src/algorithms/*" = ["E501"]
+"tests/*" = ["E501"]
