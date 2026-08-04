@@ -1,0 +1,12 @@
+.venv/
+data/
+models/*
+!models/smoke/model.onnx
+nb/
+.git/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.egg-info/
+.DS_Store
+*.pt

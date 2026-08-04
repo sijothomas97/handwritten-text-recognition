@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Create venv and install deps
+        run: |
+          uv venv -p 3.12 .venv
+          uv pip install -p .venv/bin/python -r requirements.txt \
+            --extra-index-url https://download.pytorch.org/whl/cpu
+          uv pip install -p .venv/bin/python -e .
+
+      - name: Lint (ruff)
+        run: .venv/bin/python -m ruff check src tests
+
+      - name: Smoke train (produces checkpoint + ONNX export for full test coverage)
+        run: |
+          .venv/bin/python -m htr.train --config configs/smoke.yaml
+          .venv/bin/python -m htr.export_onnx --checkpoint models/smoke/best.pt --out models/smoke/model.onnx
+
+      - name: Run tests
+        run: .venv/bin/python -m pytest -v
+
+      - name: Upload smoke model artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-model
+          path: |
+            models/smoke/model.onnx
+            models/smoke/metrics.json
+          retention-days: 7
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download smoke model artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: smoke-model
+          path: models/smoke
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: htr-service:ci
+          load: true
+
+      - name: Smoke-test the image
+        run: |
+          docker run -d --name htr-ci -p 8000:8000 htr-service:ci
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:8000/health; then break; fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8000/health | tee /dev/stderr | grep -q '"model_loaded":true'
+          docker logs htr-ci
+          docker stop htr-ci
