@@ -1,6 +1,3 @@
-import torch.nn as nn
-
-
 class BasicBlock(nn.Module):
 
     expansion = 1
@@ -46,7 +43,7 @@ class BasicBlock(nn.Module):
         x = self.relu(x)
 
         return x
-
+    
 
 class Bottleneck(nn.Module):
 
