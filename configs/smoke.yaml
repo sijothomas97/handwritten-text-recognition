@@ -1,0 +1,22 @@
+# Smoke-scale training: 1 epoch on a 4k-sample MNIST subset (~2 min on CPU).
+data:
+  dataset: mnist
+  root: data
+  image_size: 28
+  batch_size: 128
+  num_workers: 0
+  train_subset: 4000
+  test_subset: 1000
+
+model:
+  arch: resnet18
+  image_channels: 1
+
+train:
+  epochs: 1
+  lr: 0.001
+  weight_decay: 0.0
+  seed: 42
+  device: cpu
+  out_dir: models
+  run_name: smoke

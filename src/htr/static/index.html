@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Handwritten digit recognition</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: system-ui, -apple-system, sans-serif;
+    background: #f4f5f7; color: #1c1e21;
+    display: flex; justify-content: center; padding: 2rem 1rem;
+  }
+  main { width: 100%; max-width: 720px; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  p.sub { margin: 0 0 1.25rem; color: #5a5f66; font-size: .9rem; }
+  .row { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+  .card {
+    background: #fff; border: 1px solid #e2e4e8; border-radius: 10px;
+    padding: 1rem; flex: 1 1 300px;
+  }
+  .card h2 { font-size: .95rem; margin: 0 0 .75rem; }
+  canvas {
+    background: #000; border-radius: 6px; touch-action: none;
+    display: block; width: 280px; height: 280px; cursor: crosshair;
+  }
+  .btns { margin-top: .75rem; display: flex; gap: .5rem; }
+  button {
+    font: inherit; padding: .45rem .9rem; border-radius: 6px;
+    border: 1px solid #c9ccd1; background: #fff; cursor: pointer;
+  }
+  button.primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+  button:hover { filter: brightness(.96); }
+  input[type=file] { font-size: .85rem; }
+  #result { margin-top: 1.25rem; }
+  .pred {
+    font-size: 2.2rem; font-weight: 700;
+  }
+  .conf { color: #5a5f66; font-size: .9rem; margin-bottom: .75rem; }
+  .bar-row { display: flex; align-items: center; gap: .5rem; font-size: .8rem; margin: 2px 0; }
+  .bar-row .lab { width: 1.2rem; text-align: right; font-variant-numeric: tabular-nums; }
+  .bar-track { flex: 1; background: #eceef1; border-radius: 4px; height: 12px; overflow: hidden; }
+  .bar-fill { height: 100%; background: #2563eb; border-radius: 4px; width: 0; transition: width .2s; }
+  .bar-row.best .bar-fill { background: #16a34a; }
+  .err { color: #b91c1c; font-size: .9rem; margin-top: .75rem; }
+  .muted { color: #8a8f96; font-size: .85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Handwritten digit recognition</h1>
+  <p class="sub">Draw a digit (0&ndash;9) or upload an image; a from-scratch ResNet served via ONNX Runtime predicts it.</p>
+
+  <div class="row">
+    <div class="card">
+      <h2>Draw</h2>
+      <canvas id="pad" width="280" height="280"></canvas>
+      <div class="btns">
+        <button class="primary" id="predictBtn">Predict</button>
+        <button id="clearBtn">Clear</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Or upload</h2>
+      <input type="file" id="fileInput" accept="image/*">
+      <p class="muted">PNG/JPEG of a single handwritten digit. Prediction runs automatically on selection.</p>
+      <div id="result" hidden>
+        <div class="pred" id="predLabel"></div>
+        <div class="conf" id="predConf"></div>
+        <div id="bars"></div>
+      </div>
+      <div class="err" id="error" hidden></div>
+    </div>
+  </div>
+</main>
+
+<script>
+const canvas = document.getElementById('pad');
+const ctx = canvas.getContext('2d');
+ctx.fillStyle = '#000';
+ctx.fillRect(0, 0, canvas.width, canvas.height);
+ctx.strokeStyle = '#fff';
+ctx.lineWidth = 18;
+ctx.lineCap = 'round';
+ctx.lineJoin = 'round';
+
+let drawing = false;
+function pos(e) {
+  const r = canvas.getBoundingClientRect();
+  const p = e.touches ? e.touches[0] : e;
+  return [ (p.clientX - r.left) * canvas.width / r.width,
+           (p.clientY - r.top) * canvas.height / r.height ];
+}
+function start(e) { drawing = true; const [x, y] = pos(e); ctx.beginPath(); ctx.moveTo(x, y); e.preventDefault(); }
+function move(e)  { if (!drawing) return; const [x, y] = pos(e); ctx.lineTo(x, y); ctx.stroke(); e.preventDefault(); }
+function end()    { drawing = false; }
+canvas.addEventListener('pointerdown', start);
+canvas.addEventListener('pointermove', move);
+window.addEventListener('pointerup', end);
+
+document.getElementById('clearBtn').onclick = () => {
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  hideResult();
+};
+
+function hideResult() {
+  document.getElementById('result').hidden = true;
+  document.getElementById('error').hidden = true;
+}
+
+function showError(msg) {
+  hideResult();
+  const el = document.getElementById('error');
+  el.textContent = msg;
+  el.hidden = false;
+}
+
+function showResult(data) {
+  document.getElementById('error').hidden = true;
+  document.getElementById('predLabel').textContent = data.label;
+  document.getElementById('predConf').textContent =
+    (data.confidence * 100).toFixed(1) + '% confident · ' + data.latency_ms + ' ms';
+  const bars = document.getElementById('bars');
+  bars.innerHTML = '';
+  for (const [lab, p] of Object.entries(data.probabilities)) {
+    const row = document.createElement('div');
+    row.className = 'bar-row' + (lab === data.label ? ' best' : '');
+    row.innerHTML = '<span class="lab">' + lab + '</span>' +
+      '<div class="bar-track"><div class="bar-fill" style="width:' + (p * 100).toFixed(1) + '%"></div></div>';
+    bars.appendChild(row);
+  }
+  document.getElementById('result').hidden = false;
+}
+
+async function handleResponse(res) {
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) { showError(data.detail || ('Request failed (' + res.status + ')')); return; }
+  showResult(data);
+}
+
+document.getElementById('predictBtn').onclick = async () => {
+  try {
+    const res = await fetch('/predict', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_b64: canvas.toDataURL('image/png') }),
+    });
+    await handleResponse(res);
+  } catch (e) { showError('Network error: ' + e.message); }
+};
+
+document.getElementById('fileInput').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/predict', { method: 'POST', body: fd });
+    await handleResponse(res);
+  } catch (err) { showError('Network error: ' + err.message); }
+});
+</script>
+</body>
+</html>

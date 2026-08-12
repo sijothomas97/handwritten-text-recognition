@@ -1,0 +1,8 @@
+# Minimal runtime deps for the inference service (no torch needed).
+# Pins match requirements.txt.
+fastapi==0.141.1
+uvicorn==0.52.1
+onnxruntime==1.28.0
+numpy==2.5.1
+pillow==12.3.0
+python-multipart==0.0.32

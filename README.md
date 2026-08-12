@@ -1,112 +1,102 @@
-# Handwritten Text Recognition
+# hand-written-text-reading
 
-## Introduction
-This project implements a deep learning-based approach to recognizing handwritten text using PyTorch. It leverages various machine learning techniques and libraries to preprocess data, train models, and evaluate their performance. The project is designed to be flexible, allowing for easy configuration and adaptation to different datasets.
+Hand-written text reading using deep learning models. From-scratch ResNet
+classifiers (originally Colab notebooks under `nb/`) refactored into a
+reproducible, config-driven training package.
 
-## Table of Contents
-- [Introduction](#introduction)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Features](#features)
-- [Dependencies](#dependencies)
-- [Configuration](#configuration)
-- [Documentation](#documentation)
-- [Examples](#examples)
-- [Troubleshooting](#troubleshooting)
-- [Contributors](#contributors)
-- [License](#license)
+## Setup
 
-## Installation
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/handwritten-text-recognition.git
-   ```
-2. Navigate to the project directory:
-   ```bash
-   cd handwritten-text-recognition
-   ```
-3. Install the required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+uv venv -p 3.12 .venv
+uv pip install -p .venv/bin/python -r requirements.txt
+uv pip install -p .venv/bin/python -e .
+```
 
-## Usage
-1. Mount your Google Drive to access the dataset (if using Google Colab):
-   ```python
-   from google.colab import drive
-   drive.mount('/content/drive/')
-   ```
+## Train / evaluate / export
 
-2. Ensure the dataset is properly structured and unpacked.
+```bash
+# Smoke run: 1 epoch on a 4k MNIST subset (~1 min CPU), auto-downloads data/
+.venv/bin/python -m htr.train --config configs/smoke.yaml
 
-3. Run the notebook to start training:
-   ```bash
-   jupyter notebook Handwritten_text_recognition.ipynb
-   ```
+# Full MNIST run
+.venv/bin/python -m htr.train --config configs/full_mnist.yaml
 
-4. (Optional) Set a seed for reproducibility:
-   ```python
-   SEED = 1234
-   random.seed(SEED)
-   np.random.seed(SEED)
-   torch.manual_seed(SEED)
-   torch.cuda.manual_seed(SEED)
-   torch.backends.cudnn.deterministic = True
-   ```
+# Evaluate a checkpoint
+.venv/bin/python -m htr.evaluate --checkpoint models/smoke/best.pt
 
-## Features
-- **Model Training**: Train a deep learning model using PyTorch to recognize handwritten text.
-- **Preprocessing**: Includes data loading and preprocessing steps.
-- **Evaluation**: Evaluate model performance using confusion matrices and other metrics.
+# Export to ONNX
+.venv/bin/python -m htr.export_onnx --checkpoint models/smoke/best.pt --out models/smoke/model.onnx
+```
 
-## Dependencies
-- `torch`
-- `torchvision`
-- `sklearn`
-- `matplotlib`
-- `pandas`
-- `numpy`
-- `tqdm`
-- `google.colab` (if using Google Drive)
+Checkpoints (`best.pt`, `last.pt`) and `metrics.json` are written to
+`models/<run_name>/`. Datasets (MNIST, or EMNIST via config) are downloaded
+automatically by torchvision into `data/`.
 
-## Configuration
-You can adjust the following parameters within the notebook:
-- **Dataset Path**: Specify the path to your dataset.
-- **Model Parameters**: Adjust the model architecture and hyperparameters such as learning rate, optimizer, and batch size.
-- **Random Seed**: Set a random seed for reproducibility.
+## Serve the API + UI
 
-## Documentation
-The project is structured as a Jupyter Notebook, providing step-by-step guidance. You can modify the cells as needed for experimentation with different datasets or model architectures.
+The FastAPI service loads the exported ONNX model and serves both the
+`/predict` API and a static draw-or-upload HTML page.
 
-## Examples
-1. Example of mounting Google Drive and loading the dataset:
-   ```python
-   from google.colab import drive
-   drive.mount('/content/drive/')
-   ```
+```bash
+# after training + exporting a model to models/smoke/model.onnx (see above)
+.venv/bin/python -m uvicorn htr.service:app --port 8000
+```
 
-2. Example of training a model:
-   ```python
-   # Start training the model
-   model.train()
-   for epoch in range(num_epochs):
-       # Training loop here
-   ```
+Then open http://127.0.0.1:8000/ in a browser to draw a digit on the canvas
+or upload an image, or call the API directly:
 
-3. Example of evaluating the model:
-   ```python
-   # Confusion matrix evaluation
-   y_pred = model.predict(X_test)
-   cm = confusion_matrix(y_true, y_pred)
-   ConfusionMatrixDisplay(cm).plot()
-   ```
+```bash
+# health check
+curl http://127.0.0.1:8000/health
 
-## Troubleshooting
-- **Google Drive Mount Issues**: Ensure that you have the correct permissions and that the drive is properly mounted.
-- **Out of Memory Errors**: Reduce the batch size if you're running into memory constraints.
+# predict from an image file (multipart upload)
+curl -X POST http://127.0.0.1:8000/predict -F "file=@/path/to/digit.png"
 
-## Contributors
-- [sijothomas97](https://github.com/sijothomas97)
+# predict from base64 (what the canvas UI sends)
+curl -X POST http://127.0.0.1:8000/predict \
+  -H "Content-Type: application/json" \
+  -d "{\"image_b64\": \"$(base64 -i /path/to/digit.png)\"}"
+```
 
-## License
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+`/predict` returns `{"label": "7", "confidence": 0.98, "probabilities": {...}, "latency_ms": 3.9}`.
+The model path is configurable via `HTR_MODEL_PATH` (defaults to
+`models/smoke/model.onnx`, resolved relative to the current working directory).
+
+## Docker
+
+A lightweight image (FastAPI + ONNX Runtime only, no torch/torchvision) bakes
+in the exported `models/smoke/model.onnx`:
+
+```bash
+docker build -t htr-service .
+docker run -p 8000:8000 htr-service
+curl http://127.0.0.1:8000/health
+```
+
+Rebuild the image after re-exporting a new model to pick up the change.
+
+## Tests
+
+```bash
+.venv/bin/python -m pytest
+```
+
+Covers preprocessing transforms, model forward shapes (resnet18/34/50),
+ONNX-vs-PyTorch output parity, and the FastAPI service (`/health`, `/predict`
+via multipart + base64, error handling, and prediction accuracy against real
+MNIST samples when a trained model is present).
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push/PR: ruff lint, a smoke training
+run to produce a real checkpoint, the full pytest suite, and a Docker build +
+container health-check smoke test.
+
+## Layout
+
+- `src/algorithms/` — from-scratch ResNet blocks and configs (BasicBlock, Bottleneck, resnet18–152)
+- `src/htr/` — config, data loaders, training/eval loops, CLIs, ONNX export, `service.py` (FastAPI app), `static/` (canvas + upload UI)
+- `configs/` — YAML run configs
+- `tests/` — model, transform, ONNX-parity, and API tests
+- `Dockerfile` — serving-only image (`requirements-serve.txt`, no torch)
+- `nb/` — original Colab notebooks (kept for reference)
