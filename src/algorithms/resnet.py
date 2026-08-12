@@ -6,7 +6,7 @@ from .bottleneck import BasicBlock, Bottleneck
 
 
 class ResNet(nn.Module):
-    def __init__(self, config, output_dim):
+    def __init__(self, config, output_dim, image_channels = 3):
         super().__init__()
 
         block, n_blocks, channels = config
@@ -14,7 +14,7 @@ class ResNet(nn.Module):
 
         assert len(n_blocks) == len(channels) == 4
 
-        self.conv1 = nn.Conv2d(3, self.in_channels, kernel_size = 7, stride = 2, padding = 3, bias = False)
+        self.conv1 = nn.Conv2d(image_channels, self.in_channels, kernel_size = 7, stride = 2, padding = 3, bias = False)
         self.bn1 = nn.BatchNorm2d(self.in_channels)
         self.relu = nn.ReLU(inplace = True)
         self.maxpool = nn.MaxPool2d(kernel_size = 3, stride = 2, padding = 1)
