@@ -1,3 +1,10 @@
+from collections import namedtuple
+
+import torch.nn as nn
+
+from .bottleneck import BasicBlock, Bottleneck
+
+
 class ResNet(nn.Module):
     def __init__(self, config, output_dim):
         super().__init__()
